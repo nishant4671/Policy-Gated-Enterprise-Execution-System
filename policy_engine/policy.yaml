@@ -1,0 +1,26 @@
+version: "1.0"
+rules:
+  - name: "High Value Purchase"
+    condition: "cost > 1000"
+    verdict: "REQUIRE_HUMAN_APPROVAL"
+    description: "Purchases over $1,000 require manager approval"
+
+  - name: "Unapproved Vendor"
+    condition: "vendor_approved == False"
+    verdict: "BLOCK"
+    description: "Only approved vendors may be used"
+
+  - name: "Intern Purchase Limit"
+    condition: "employee_role == 'Intern' and cost > 500"
+    verdict: "BLOCK"
+    description: "Interns cannot order equipment over $500"
+
+  - name: "Budget Exceeded"
+    condition: "cost > remaining_budget"
+    verdict: "BLOCK"
+    description: "Purchase cannot exceed remaining department budget"
+
+  - name: "Forbidden Action"
+    condition: "action in ['delete_employee', 'modify_salary', 'grant_admin']"
+    verdict: "BLOCK"
+    description: "Certain actions are always forbidden"

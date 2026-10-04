@@ -1,0 +1,30 @@
+﻿# Environments
+venv/
+env/
+.env
+
+# Python caches and compiled files
+__pycache__/
+*.py[cod]
+*.class
+.pytest_cache/
+
+# Streamlit
+.streamlit/
+
+# Databases & Checkpoints
+*.db
+!mock_systems/enterprise.db
+agent/checkpoints.db
+results/checkpoint.json
+
+# Temporary, logs, and backups
+*.log
+*.tmp
+*.bak
+*.old
+.backup/
+
+# OS generated files
+.DS_Store
+Thumbs.db
