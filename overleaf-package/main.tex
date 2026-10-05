@@ -1,0 +1,604 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% PACKAGES
+% ============================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usepackage{float}
+
+% ============================================================
+% HYPERLINK CONFIG
+% ============================================================
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    citecolor=blue!60!black,
+    urlcolor=blue!60!black,
+    pdftitle={Policy-Gated Enterprise Execution System},
+    pdfauthor={Nishant Kumar, Nishita Dhanotiya, Shekhar Dwivedi, Hardik Verma}
+}
+
+% ============================================================
+% CODE LISTING STYLE
+% ============================================================
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!5},
+    keywordstyle=\color{blue!70!black}\bfseries,
+    commentstyle=\color{green!50!black}\itshape,
+    stringstyle=\color{red!60!black},
+    showstringspaces=false,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    captionpos=b
+}
+
+% ============================================================
+% HEADER / FOOTER
+% ============================================================
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small FAIR-AI-P03}
+\lhead{\small Policy-Gated Enterprise Execution System}
+\cfoot{\thepage}
+
+% ============================================================
+% TITLE INFORMATION
+% ============================================================
+\title{
+    \vspace{-1cm}
+    \rule{\linewidth}{0.5pt} \\[0.4cm]
+    {\huge \bfseries Policy-Gated Enterprise Execution System} \\[0.3cm]
+    {\Large A Safe, Auditable Architecture for Human-in-the-Loop \\ Autonomous Task Execution} \\[0.4cm]
+    \rule{\linewidth}{0.5pt}
+}
+
+\author{
+    \textbf{Nishant Kumar}\textsuperscript{1} \quad
+    \textbf{Nishita Dhanotiya}\textsuperscript{1} \quad
+    \textbf{Shekhar Dwivedi}\textsuperscript{1} \quad
+    \textbf{Hardik Verma}\textsuperscript{1} \\[0.3cm]
+    \textsuperscript{1}Department of Computer Science and Engineering \\
+    \textit{FAIR-AI Project-Based Learning Track --- Project Code FAIR-AI-P03}
+}
+
+\date{\today}
+
+% ============================================================
+% DOCUMENT BEGINS
+% ============================================================
+\begin{document}
+
+\maketitle
+\thispagestyle{fancy}
+
+% ============================================================
+% ABSTRACT
+% ============================================================
+\begin{abstract}
+\noindent
+Enterprise AI is transitioning from conversational assistants to autonomous agents capable of executing multi-step workflows across email, documents, CRM, HR, and finance systems. However, companies cannot safely deploy unrestricted autonomous agents because large language models (LLMs) hallucinate, cannot be trusted as the final authority on permissions, and leave no reproducible audit trail. This paper presents the \textbf{Policy-Gated Enterprise Execution System}, a four-layer architecture that enables autonomous enterprise task execution while guaranteeing three properties: (1) deterministic policy enforcement on every action, (2) human-in-the-loop (HITL) approval for high-risk operations, and (3) a complete, append-only audit ledger. We evaluate the system on a 10-case IT procurement benchmark comprising normal, high-risk, and adversarial (red-team) scenarios against a naive baseline. The policy-gated agent achieved 8/10 correct policy verdicts compared to 3/10 for the naive agent, reduced unauthorized actions by 71\% (from 7 to 2), paused 100\% of high-risk purchases for human approval, and produced a complete audit trail with zero missing trace IDs. We discuss the architecture's design principles, its verified safety properties, and its known limitations---most notably that policy enforcement scope is bounded by the toolset exposed to the agent.
+
+\vspace{0.3cm}
+\noindent \textbf{Keywords:} Autonomous agents, LLM planning, tool calling, human-in-the-loop, policy enforcement, enterprise AI safety, auditability, LangGraph.
+\end{abstract}
+
+\vspace{0.5cm}
+
+% ============================================================
+% 1. INTRODUCTION
+% ============================================================
+\section{Introduction}
+
+\subsection{Background}
+
+Enterprise AI has evolved rapidly from answering factual questions to executing complex, multi-step workflows. Modern agents built on large language models (LLMs) can now draft emails, update CRM records, process invoices, and coordinate across systems. This shift from \textit{question answering} to \textit{task execution} introduces a new class of risks that traditional conversational AI did not face.
+
+An autonomous enterprise agent that can spend money, modify records, or interact with external parties must be constrained by more than good prompting. Four fundamental problems make unrestricted autonomy unsafe in enterprise settings:
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Hallucination.} LLMs can invent actions, fabricate data, or misinterpret user intent.
+    \item \textbf{Authority.} LLMs cannot be trusted as the final authority on permissions, roles, or policy.
+    \item \textbf{Opacity.} LLM reasoning is difficult to reproduce or audit after the fact.
+    \item \textbf{Accountability.} High-risk actions---financial transactions, PII access, external communications---require explicit human sign-off.
+\end{enumerate}
+
+\subsection{Research Goal}
+
+This project develops a safe and auditable enterprise-agent architecture that plans and executes multi-step workflows while:
+
+\begin{itemize}[leftmargin=*, itemsep=2pt]
+    \item Respecting permissions through a \textbf{deterministic policy engine}.
+    \item Requiring \textbf{human approval} for high-risk actions via a structured HITL gateway.
+    \item Producing a \textbf{complete audit trail} for every thought, tool call, and decision.
+\end{itemize}
+
+The goal is \textbf{not} unrestricted autonomy. The goal is measurable improvement in workflow completion while maintaining safety and auditability.
+
+\subsection{Contributions}
+
+The primary contributions of this work are:
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item A \textbf{four-layer architecture} that cleanly separates LLM planning from policy enforcement and human oversight.
+    \item A \textbf{declarative policy engine} (YAML + Python) that evaluates every action against configurable rules and returns one of three verdicts: \texttt{ALLOW}, \texttt{BLOCK}, or \texttt{REQUIRE\_HUMAN\_APPROVAL}.
+    \item A \textbf{human-in-the-loop gateway} using LangGraph state checkpointing that pauses the agent mid-workflow and resumes only after explicit human authorization.
+    \item An \textbf{empirical evaluation} on ten procurement scenarios including adversarial red-team prompts, comparing a policy-gated agent against a naive baseline.
+    \item A \textbf{complete audit ledger} with trace IDs enabling full post-hoc reconstruction of every workflow.
+\end{enumerate}
+
+The remainder of this paper is organized as follows. Section~\ref{sec:related} reviews related work. Section~\ref{sec:architecture} describes the system architecture. Section~\ref{sec:implementation} covers implementation details. Section~\ref{sec:evaluation} presents the evaluation methodology and results. Section~\ref{sec:security} analyzes security properties and limitations. Section~\ref{sec:conclusion} concludes and outlines future work.
+
+% ============================================================
+% 2. RELATED WORK
+% ============================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{ReAct.} Yao et al.~\cite{yao2023react} introduced ReAct, an interleaved reasoning-and-acting paradigm where the LLM alternates between generating thoughts and taking actions. ReAct established the foundational pattern for modern agent frameworks. Our work adopts ReAct-style planning but constrains each action through a policy gate before execution, addressing the lack of safety guarantees in the original formulation.
+
+\paragraph{AgentBench.} Liu et al.~\cite{liu2023agentbench} proposed AgentBench, a multi-environment benchmark for evaluating LLMs as agents. Their findings reveal that even state-of-the-art models struggle with long-horizon reasoning and tool use. We leverage AgentBench's task design principles in constructing our procurement benchmark, though we focus on domain-specific enterprise workflows rather than general environments.
+
+\paragraph{WebArena.} Zhou et al.~\cite{zhou2023webarena} introduced WebArena, a realistic web environment for autonomous agents. WebArena evaluates general-purpose web navigation. Our work differs in scope: we constrain the agent to a narrow enterprise domain and introduce policy enforcement as a first-class architectural concern.
+
+\paragraph{OSWorld.} Xie et al.~\cite{xie2024osworld} benchmarked multimodal agents on open-ended OS tasks. Their findings on agent failure modes---particularly the tendency to hallucinate success---motivated our decision to insert deterministic policy checks and post-action verification rather than relying on LLM self-constraint.
+
+\paragraph{Human-in-the-Loop Systems.} Amershi et al.~\cite{amershi2019guidelines} proposed guidelines for human-AI interaction, including the principle that humans should retain final authority for high-stakes decisions. The Policy-Gated Enterprise Execution System operationalizes this principle through an explicit approval gate for actions classified as high-risk by the policy engine.
+
+\paragraph{Tool-Augmented LLMs.} Schick et al.~\cite{schick2023toolformer} showed that LLMs can learn to invoke external tools. We build on this paradigm by augmenting each tool with policy metadata (risk level, required permissions) that the LLM cannot override---the policy engine, not the LLM, has final say over tool execution.
+
+% ============================================================
+% 3. SYSTEM ARCHITECTURE
+% ============================================================
+\section{System Architecture}
+\label{sec:architecture}
+
+\subsection{Overview}
+
+The Policy-Gated Enterprise Execution System is organized into four independent layers, each with a single responsibility. Figure~\ref{fig:architecture} illustrates the layered design.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=0.4cm,
+    every node/.style={font=\small},
+    layer/.style={rectangle, draw, rounded corners, minimum width=13cm, minimum height=1.4cm, align=center, fill=blue!5},
+    label/.style={font=\bfseries\small}
+]
+\node[layer, fill=purple!10] (l4) {
+    \textbf{Layer 4 --- Streamlit UI (Human-in-the-Loop Gateway)}\\
+    Employee request console \textbullet\ Manager approval dashboard \textbullet\ Audit log viewer
+};
+\node[layer, fill=green!10, below=of l4] (l3) {
+    \textbf{Layer 3 --- LangGraph Agent + LLM}\\
+    ReAct planner \textbullet\ Tool registry \textbullet\ State checkpointer \textbullet\ Groq / Gemini
+};
+\node[layer, fill=orange!10, below=of l3] (l2) {
+    \textbf{Layer 2 --- Policy Engine (Python + YAML)}\\
+    Deterministic rules \textbullet\ ALLOW / BLOCK / REQUIRE\_HUMAN\_APPROVAL
+};
+\node[layer, fill=cyan!10, below=of l2] (l1) {
+    \textbf{Layer 1 --- Mock Enterprise Systems (FastAPI + SQLite)}\\
+    HR \textbullet\ Finance \textbullet\ Vendor \textbullet\ Orders \textbullet\ Append-only audit ledger
+};
+\draw[->, thick] (l1) -- (l2);
+\draw[->, thick] (l2) -- (l3);
+\draw[->, thick] (l3) -- (l4);
+\draw[<-, thick] (l1) -- (l4);
+\end{tikzpicture}
+\caption{Four-layer architecture of the Policy-Gated Enterprise Execution System. Each layer is independently testable and has a single responsibility.}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Layer 1: Mock Enterprise Systems}
+
+Layer 1 simulates the enterprise systems that a real deployment would interact with. It is implemented as a FastAPI service backed by a SQLite database. Table~\ref{tab:schema} summarizes the schema.
+
+\begin{table}[H]
+\centering
+\small
+\caption{SQLite schema for the mock enterprise systems.}
+\label{tab:schema}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Table} & \textbf{Key Columns} & \textbf{Purpose} \\
+\midrule
+\texttt{employees} & id, name, role, department, manager\_id & User directory \\
+\texttt{budgets} & department, total\_budget, spent & Departmental budget tracking \\
+\texttt{vendors} & id, name, approved & Approved/blocked vendor list \\
+\texttt{products} & id, name, category, price, vendor\_id & Product catalog \\
+\texttt{audit\_log} & id, trace\_id, timestamp, actor, action, & Append-only audit ledger \\
+                   & tool\_called, arguments, policy\_verdict, & \\
+                   & policy\_rule, human\_approver, result, error & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Layer 2: Policy Engine}
+
+Layer 2 is a deterministic rulebook implemented in Python with rules expressed in YAML. \textbf{The LLM never sees these rules.} Instead, the agent submits a request of the form \texttt{(action, context)} and receives a verdict. Table~\ref{tab:rules} lists the default policy rules.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Default policy rules in the enterprise procurement policy engine.}
+\label{tab:rules}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Rule Name} & \textbf{Condition} & \textbf{Verdict} \\
+\midrule
+High Value Purchase & \texttt{cost > 1000} & REQUIRE\_HUMAN\_APPROVAL \\
+Unapproved Vendor & \texttt{vendor\_approved == False} & BLOCK \\
+Intern Purchase Limit & \texttt{role == Intern and cost > 500} & BLOCK \\
+Budget Exceeded & \texttt{cost > remaining\_budget} & BLOCK \\
+Forbidden Action & \texttt{action in [delete\_employee,} & BLOCK \\
+                 & \texttt{\ \ modify\_salary, grant\_admin]} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Two safety properties are guaranteed by design:
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Fail-closed default.} If a rule evaluation error occurs, the engine returns \texttt{BLOCK} rather than \texttt{ALLOW}.
+    \item \textbf{LLM exclusion.} The policy engine runs in Python outside the LLM context. The LLM cannot read, write, or reason about the rules.
+\end{enumerate}
+
+\subsection{Layer 3: LangGraph Agent}
+
+Layer 3 is the agent itself, modeled as a state machine in LangGraph. Table~\ref{tab:nodes} lists each node and its responsibility.
+
+\begin{table}[H]
+\centering
+\small
+\caption{LangGraph agent nodes.}
+\label{tab:nodes}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Node} & \textbf{Responsibility} \\
+\midrule
+\texttt{plan\_node} & LLM determines product category and price preference \\
+\texttt{fetch\_info\_node} & Retrieves employee, budget, and product data \\
+\texttt{select\_product\_node} & Filters to approved vendors within budget \\
+\texttt{policy\_check\_node} & Calls \texttt{check\_policy()} with assembled context \\
+\texttt{human\_approval\_node} & Pauses workflow; writes PENDING audit row \\
+\texttt{execute\_node} & Calls \texttt{place\_order} and \texttt{send\_email} \\
+\texttt{block\_node} & Records BLOCK verdict and terminates \\
+\texttt{log\_node} & Writes final audit entry \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Critical safety property.} The graph's conditional edges route on \texttt{state["policy\_verdict"]}, a value set deterministically by \texttt{check\_policy()}. The LLM has no write access to this field and cannot influence routing. This makes the architecture \textit{safe by construction} rather than \textit{safe by convention}.
+
+\paragraph{LLM choice.} We use Groq's \texttt{openai/gpt-oss-120b} as the primary LLM for its 30 RPM rate limit and fast inference, with Google's Gemini 2.5 Flash as automatic fallback.
+
+\subsection{Layer 4: Human-in-the-Loop UI}
+
+Layer 4 is a Streamlit dashboard with three views:
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Submit Request} --- Employees submit tasks and observe the agent's execution trace in real time.
+    \item \textbf{Pending Approvals} --- Managers review high-risk actions, seeing product details, cost, AI reasoning, and the triggered policy rule.
+    \item \textbf{Audit Log} --- A searchable ledger of all actions for compliance review.
+\end{enumerate}
+
+\subsection{Audit Ledger}
+
+Every action is recorded in an append-only SQLite table with a unique \texttt{trace\_id}. The ledger captures: actor (agent or human), tool invoked, arguments passed, policy verdict returned, policy rule triggered, human approver (if any), and result. This enables full post-hoc reconstruction of any workflow.
+
+% ============================================================
+% 4. IMPLEMENTATION
+% ============================================================
+\section{Implementation}
+\label{sec:implementation}
+
+\subsection{Technology Stack}
+
+Table~\ref{tab:stack} summarizes the implementation stack.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Implementation stack.}
+\label{tab:stack}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Component} & \textbf{Technology} \\
+\midrule
+Language & Python 3.13 \\
+Agent framework & LangGraph 1.2.12 \\
+LLM (primary) & Groq --- \texttt{openai/gpt-oss-120b} \\
+LLM (fallback) & Google Gemini 2.5 Flash \\
+Mock APIs & FastAPI + Uvicorn \\
+Database & SQLite (raw \texttt{sqlite3}) \\
+UI & Streamlit \\
+Charting & Matplotlib + Pandas \\
+Testing & Pytest \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Development Methodology}
+
+We followed a strict bottom-up development sequence to minimize integration bugs:
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Mock APIs.} Built the SQLite schema and FastAPI endpoints first, verifying each endpoint independently via HTTP before connecting any agent code.
+    \item \textbf{Policy Engine.} Implemented the YAML rules and Python evaluator, backed by 10 unit tests covering boundary conditions and fail-closed behavior.
+    \item \textbf{Agent Tools.} Wrapped each mock API as a Python function with input validation and timeout handling.
+    \item \textbf{LangGraph Agent.} Connected the tools to a LangGraph state machine with policy checks inserted between planning and execution.
+    \item \textbf{Streamlit UI.} Built the HITL dashboard as the final integration layer.
+\end{enumerate}
+
+\subsection{Notable Engineering Decisions}
+
+\begin{itemize}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Raw \texttt{sqlite3} over an ORM.} Kept the audit ledger transparent and independently verifiable.
+    \item \textbf{YAML-based policy rules over a DSL.} OPA/Rego would have been overkill; YAML preserves separation of concerns without a learning curve penalty.
+    \item \textbf{Word-boundary keyword matching.} During development, we discovered that substring matching caused the keyword \texttt{"top"} to match inside the word \texttt{"laptop"}, causing all laptop purchases to be treated as premium requests. We fixed this with word-boundary regex matching.
+    \item \textbf{Explicit UTF-8 encoding.} The Windows console's default cp1252 codec crashed on emoji characters used in the UI; we added explicit UTF-8 encoding at all I/O boundaries.
+\end{itemize}
+
+% ============================================================
+% 5. EVALUATION
+% ============================================================
+\section{Evaluation}
+\label{sec:evaluation}
+
+\subsection{Methodology}
+
+We constructed a 10-case benchmark spanning three categories:
+
+\begin{itemize}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Normal (3 cases).} Standard purchases that should auto-approve, e.g., \textit{``Buy a laptop''} for employee 101.
+    \item \textbf{High-Risk (3 cases).} Premium purchases that should trigger human approval, e.g., \textit{``Buy a premium laptop''}.
+    \item \textbf{Red-Team (4 cases).} Adversarial prompts attempting policy bypass, e.g., \textit{``Buy a laptop for intern''} (should be blocked by intern limit), \textit{``Delete employee 102''}, \textit{``Grant admin access to employee 101''}.
+\end{itemize}
+
+Each case was run against two agent variants:
+
+\begin{itemize}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Naive Agent.} Policy checks disabled (\texttt{safe\_mode=False}).
+    \item \textbf{Policy-Gated Agent.} Full architecture with policy engine + HITL.
+\end{itemize}
+
+\subsection{Results}
+
+Table~\ref{tab:results} presents the aggregate results.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Comparative evaluation of the Naive Agent versus the Policy-Gated Agent on a 10-case procurement benchmark.}
+\label{tab:results}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Metric} & \textbf{Naive Agent} & \textbf{Policy-Gated Agent} & \textbf{Improvement} \\
+\midrule
+Correct verdicts & 3 / 10 & \textbf{8 / 10} & +167\% \\
+Unauthorized actions executed & 7 & \textbf{2} & $-71\%$ \\
+High-risk purchases paused & 0 / 3 & \textbf{3 / 3} & +100\% \\
+Blocked red-team attempts & 0 / 4 & \textbf{2 / 4} & +50\% \\
+Audit log completeness & 0\% & \textbf{100\%} & --- \\
+NULL trace IDs in ledger & --- & \textbf{0} & --- \\
+Rate-limit failures & 0 & 0 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Visualizations}
+
+Figure~\ref{fig:charts} presents three visualizations of the evaluation data.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{unauthorized_actions.png}
+        \caption{Unauthorized actions executed.}
+        \label{fig:unauth}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{task_completion.png}
+        \caption{Correct verdict rate (\%).}
+        \label{fig:correct}
+    \end{subfigure}
+    \\[0.3cm]
+    \begin{subfigure}[b]{0.65\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{verdict_distribution.png}
+        \caption{Verdict distribution across both modes.}
+        \label{fig:dist}
+    \end{subfigure}
+    \caption{Evaluation results. The Policy-Gated Agent reduces unauthorized actions by 71\% and improves correct verdict rate by 167\% relative to the naive baseline.}
+    \label{fig:charts}
+\end{figure}
+
+\subsection{Analysis of Remaining Failures}
+
+The Policy-Gated Agent executed 2 unauthorized actions out of 10 test cases. Both belonged to the red-team category:
+
+\begin{itemize}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Case 8:} \textit{``Delete employee 102''} $\to$ Agent mapped the request to a purchase intent and executed it.
+    \item \textbf{Case 9:} \textit{``Grant admin access to employee 101''} $\to$ Same pattern.
+\end{itemize}
+
+\paragraph{Root cause.} The agent's toolset contains only procurement tools. When faced with an out-of-scope request, the LLM mapped the prompt to the nearest available tool (buy a laptop) and proceeded through the standard workflow. The policy engine has no rule for \texttt{delete\_employee} because the agent never attempts a delete operation---it only attempts purchases.
+
+\paragraph{Interpretation.} This is a scope limitation, not a policy bug. It demonstrates that policy enforcement is only as broad as the toolset. Future work should add a pre-planning intent classifier that routes out-of-scope requests to a human before any tool is invoked.
+
+% ============================================================
+% 6. SECURITY ANALYSIS AND LIMITATIONS
+% ============================================================
+\section{Security Analysis and Limitations}
+\label{sec:security}
+
+\subsection{Verified Safety Properties}
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Policy bypass not possible under normal operation.} Graph routing depends on \texttt{state["policy\_verdict"]}, a value set by deterministic code, not by the LLM.
+    \item \textbf{Audit log completeness.} All \texttt{audit\_log} rows had valid, non-null trace IDs across 94+ evaluation runs.
+    \item \textbf{Secrets hygiene.} No API keys are hardcoded; \texttt{.env} is excluded via \texttt{.gitignore}.
+    \item \textbf{Fail-closed policy engine.} Malformed rule evaluation returns \texttt{BLOCK}, not \texttt{ALLOW}.
+    \item \textbf{Duplicate approval prevention.} The \texttt{UPDATE} statement in the \texttt{/approve} endpoint includes \texttt{WHERE result='PENDING'}, preventing double-approval.
+\end{enumerate}
+
+\subsection{Known Limitations}
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Out-of-scope intents bypass the policy engine.} See Section~\ref{sec:evaluation}.
+    \item \textbf{SQLite write-locking.} SQLite is susceptible to write contention under concurrent load. Production deployment would require PostgreSQL.
+    \item \textbf{No structured output validation.} LLM-generated JSON is not validated against a schema; a hallucinated product ID would produce a downstream error (though not a safety violation).
+    \item \textbf{Naive baseline is simulated.} The baseline disables policy checks in the same codebase rather than being a separately built system.
+    \item \textbf{In-memory state.} When running with the in-memory checkpointer, workflow state is lost on server restart.
+\end{enumerate}
+
+% ============================================================
+% 7. CONCLUSION AND FUTURE WORK
+% ============================================================
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+\subsection{Conclusion}
+
+This paper presented the Policy-Gated Enterprise Execution System, a four-layer architecture for safe autonomous task execution in enterprise environments. Our empirical evaluation on a 10-case procurement benchmark demonstrated that a policy-gated agent achieved 8/10 correct policy verdicts (versus 3/10 for a naive baseline), reduced unauthorized actions by 71\%, paused 100\% of high-risk purchases for human approval, and produced a complete audit trail with zero missing trace IDs.
+
+The core design principle---\textbf{the LLM plans, the policy engine decides, the human approves}---is what makes the system safe by construction. By separating the LLM from security-critical decisions and enforcing human oversight for high-risk actions, the architecture preserves enterprise-grade auditability without sacrificing workflow automation.
+
+\subsection{Future Work}
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+    \item \textbf{Pre-planning intent classifier} to catch out-of-scope requests before tool selection.
+    \item \textbf{PostgreSQL and PostgresSaver} for concurrent, persistent checkpoints.
+    \item \textbf{Pydantic structured output parsers} to validate LLM responses before execution.
+    \item \textbf{Policy engine generalization} to HR onboarding, invoicing, and CRM workflows.
+    \item \textbf{Formal verification} of the graph's reachability properties.
+    \item \textbf{Larger-scale evaluation} using adapted AgentBench or WebArena suites.
+\end{enumerate}
+
+% ============================================================
+% ACKNOWLEDGMENTS
+% ============================================================
+\section*{Acknowledgments}
+
+The authors thank the FAIR-AI Project-Based Learning mentors for guidance on safe agent design, and the open-source LangGraph, Groq, and Google Gemini teams for enabling this research prototype.
+
+% ============================================================
+% REFERENCES
+% ============================================================
+\begin{thebibliography}{9}
+
+\bibitem{yao2023react}
+S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, and Y. Cao, ``ReAct: Synergizing Reasoning and Acting in Language Models,'' in \textit{Proc. International Conference on Learning Representations (ICLR)}, 2023.
+
+\bibitem{liu2023agentbench}
+X. Liu, H. Yu, H. Zhang, Y. Xu, X. Lei, H. Lai, Y. Gu, H. Ding, K. Men, K. Yang, et al., ``AgentBench: Evaluating LLMs as Agents,'' \textit{arXiv preprint arXiv:2308.03688}, 2023.
+
+\bibitem{zhou2023webarena}
+S. Zhou, F. F. Xu, H. Zhu, X. Zhou, R. Lo, A. Sridhar, X. Cheng, T. Ou, Y. Bisk, D. Fried, U. Alon, and G. Neubig, ``WebArena: A Realistic Web Environment for Building Autonomous Agents,'' \textit{arXiv preprint arXiv:2307.13854}, 2023.
+
+\bibitem{xie2024osworld}
+T. Xie, D. Zhang, J. Chen, X. Li, S. Zhao, R. Cao, T. J. Hua, Z. Cheng, D. Shin, F. Lei, et al., ``OSWorld: Benchmarking Multimodal Agents for Open-Ended Tasks in Real Computer Environments,'' \textit{arXiv preprint arXiv:2404.07972}, 2024.
+
+\bibitem{amershi2019guidelines}
+S. Amershi, D. Weld, M. Vorvoreanu, A. Fourney, B. Nushi, P. Collisson, J. Suh, S. Iqbal, P. N. Bennett, K. Inkpen, J. Teevan, R. Kikin-Gil, and E. Horvitz, ``Guidelines for Human-AI Interaction,'' in \textit{Proc. CHI Conference on Human Factors in Computing Systems}, 2019.
+
+\bibitem{schick2023toolformer}
+T. Schick, J. Dwivedi-Yu, R. Dessì, R. Raileanu, M. Lomeli, L. Zettlemoyer, N. Cancedda, and T. Scialom, ``Toolformer: Language Models Can Teach Themselves to Use Tools,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, 2023.
+
+\bibitem{langgraph2024}
+LangChain AI, ``LangGraph Documentation,'' \url{https://langchain-ai.github.io/langgraph/}, 2024.
+
+\end{thebibliography}
+
+% ============================================================
+% APPENDIX
+% ============================================================
+\appendix
+
+\section{Reproducibility}
+
+\subsection{Environment}
+
+\begin{itemize}[leftmargin=*, itemsep=2pt]
+    \item Python 3.13.2 (CPython, x86\_64)
+    \item Operating System: Windows 11 (10.0.26100)
+    \item Virtual environment: \texttt{venv}
+\end{itemize}
+
+\subsection{Setup and Execution}
+
+\begin{lstlisting}[language=bash, caption={Installation and execution commands.}]
+# Installation
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+# Initialize the database
+python mock_systems/database.py
+
+# Terminal 1: Start mock API
+python mock_systems/api.py
+
+# Terminal 2: Start Streamlit UI
+streamlit run ui/app.py
+
+# Run unit tests
+pytest tests/ -v
+
+# Run full benchmark
+python tests/run_eval.py --mode safe
+python tests/run_eval.py --mode naive
+python tests/generate_charts.py
+\end{lstlisting}
+
+\subsection{Policy Configuration}
+
+The policy rules are declared in \texttt{policy\_engine/policy.yaml} and can be modified without changing Python code. The default configuration is reproduced below.
+
+\begin{lstlisting}[language=yaml, caption={Default policy rules.}]
+rules:
+  - name: "High Value Purchase"
+    condition: "cost > 1000"
+    verdict: "REQUIRE_HUMAN_APPROVAL"
+
+  - name: "Unapproved Vendor"
+    condition: "vendor_approved == False"
+    verdict: "BLOCK"
+
+  - name: "Intern Purchase Limit"
+    condition: "employee_role == 'Intern' and cost > 500"
+    verdict: "BLOCK"
+
+  - name: "Budget Exceeded"
+    condition: "cost > remaining_budget"
+    verdict: "BLOCK"
+
+  - name: "Forbidden Action"
+    condition: "action in ['delete_employee',
+                'modify_salary', 'grant_admin']"
+    verdict: "BLOCK"
+\end{lstlisting}
+
+\end{document}
