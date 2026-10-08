@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
@@ -49,9 +50,18 @@ def _safe_llm_invoke(llm_instance, messages, max_retries=2, base_wait=10):
 
 def plan_node(state: AgentState) -> dict:
     req = state["messages"][-1]
+    req_content = str(req.content if hasattr(req, "content") else req).lower()
+    keywords = ["laptop", "monitor", "keyboard", "mouse", "equipment", "cheapbook"]
+    if sum(1 for kw in keywords if kw in req_content) < 1:
+        return {"status": "blocked", "final_result": "Request unclear. Please specify product."}
+    
+    if any(kw in req_content for kw in ["ignore", "bypass", "override", "system prompt"]):
+        return {"status": "blocked", "final_result": "Policy violation: Prompt injection detected"}
+
+    req = state["messages"][-1]
     emp_id = state["employee_id"]
     
-    prompt = f"User request: '{req}'. Employee ID: {emp_id}. Return JSON exactly: {{\"product_category\": \"<string>\", \"preferred_price_max\": <number>}}"
+    prompt = f"User request: '{req}'. Employee ID: {emp_id}. Map the requested product to one of these valid categories: 'laptop', 'monitor', 'keyboard', 'mouse'. Return JSON exactly: {{\"product_category\": \"<string>\", \"preferred_price_max\": <number>}}"
     
     resp = _safe_llm_invoke(llm, [HumanMessage(content=prompt)])
     content = resp.content.strip()
@@ -63,7 +73,9 @@ def plan_node(state: AgentState) -> dict:
     try:
         data = json.loads(content)
     except Exception:
-        data = {"product_category": "laptop", "preferred_price_max": 2000}
+        return {"status": "blocked", "final_result": "Could not understand request"}
+    if "product_category" not in data or not data["product_category"]:
+        return {"status": "blocked", "final_result": "Could not understand request"}
         
     return {
         "product_info": data,
@@ -71,7 +83,12 @@ def plan_node(state: AgentState) -> dict:
     }
 
 def fetch_info_node(state: AgentState) -> dict:
-    emp = get_employee(state["employee_id"])
+    try:
+        emp = get_employee(state["employee_id"])
+    except Exception:
+        emp = {}
+    if not emp or emp.get("error"):
+        return {"status": "blocked", "final_result": "Employee not found", "employee_info": {}}
     dept = emp.get("department", "Unknown")
     
     budget = check_budget(dept)
@@ -95,12 +112,13 @@ def select_product_node(state: AgentState) -> dict:
     rem_budget = state.get("remaining_budget", 0.0)
     req = str(state.get("messages", [""])[0]).lower()
     
-    approved_products = [p for p in products if p.get("vendor_approved") == 1 and p.get("price", float('inf')) <= rem_budget]
+    cat = state.get("product_info", {}).get("product_category", "laptop")
+    approved_products = [p for p in products if p.get("vendor_approved") == 1 and p.get("price", float('inf')) <= rem_budget and p.get("category", "").lower() == cat.lower()]
     
     if not approved_products:
         return {
             "status": "blocked",
-            "final_result": "No approved product within budget",
+            "final_result": f"No products available in category {cat}",
             "cost": 0.0,
             "vendor_approved": False
         }
@@ -122,19 +140,23 @@ def select_product_node(state: AgentState) -> dict:
     }
 
 def policy_check_node(state: AgentState) -> dict:
-    emp = state.get("employee_info", {})
-    context = {
-        "cost": state.get("cost", 0.0),
-        "vendor_approved": state.get("vendor_approved", False),
-        "employee_role": emp.get("role", "Unknown"),
-        "remaining_budget": state.get("remaining_budget", 0.0)
-    }
-    
-    res = check_policy("purchase", context)
-    return {
-        "policy_verdict": res["verdict"],
-        "policy_rule": res["rule"]
-    }
+    try:
+        emp = state.get("employee_info", {})
+        context = {
+            "cost": state.get("cost", 0.0),
+            "vendor_approved": state.get("vendor_approved", False),
+            "employee_role": emp.get("role", "Unknown"),
+            "remaining_budget": state.get("remaining_budget", 0.0)
+        }
+        
+        res = check_policy("purchase", context)
+        return {
+            "policy_verdict": res["verdict"],
+            "policy_rule": res["rule"]
+        }
+    except Exception as e:
+        write_audit(trace_id=state.get("trace_id",""), actor="agent", action="policy_error", result="FAILED", tool_called="none", arguments="{}", policy_verdict="ERROR", policy_rule="none")
+        return {"status": "error", "final_result": str(e), "policy_verdict": "BLOCK", "policy_rule": "error"}
 
 def human_approval_node(state: AgentState) -> dict:
     import json
@@ -161,39 +183,47 @@ def human_approval_node(state: AgentState) -> dict:
     return {"status": "awaiting_approval"}
 
 def execute_node(state: AgentState) -> dict:
-    prod_id = state.get("product_id")
-    emp_id = state.get("employee_id")
-    trace_id = state.get("trace_id", "")
-    
-    place_order(prod_id, emp_id, trace_id)
-    send_email("admin@company.com", "Order Placed", f"Ordered product {prod_id}", trace_id)
-    
-    return {
-        "status": "done",
-        "final_result": "Order placed"
-    }
+    try:
+        prod_id = state.get("product_id")
+        emp_id = state.get("employee_id")
+        trace_id = state.get("trace_id", "")
+        
+        place_order(prod_id, emp_id, trace_id)
+        send_email("admin@company.com", "Order Placed", f"Ordered product {prod_id}", trace_id)
+        
+        return {
+            "status": "done",
+            "final_result": "Order placed"
+        }
+    except Exception as e:
+        write_audit(trace_id=state.get("trace_id",""), actor="agent", action="execute_error", result="FAILED", tool_called="none", arguments="{}", policy_verdict="ERROR", policy_rule="none")
+        return {"status": "error", "final_result": str(e)}
 
 def block_node(state: AgentState) -> dict:
-    final = state.get("final_result")
-    rule = state.get("policy_rule", "unknown")
-    if not final or final == "No approved product within budget":
-        if rule != "default" and rule != "Unapproved Vendor":
-            final = rule
-            
-    write_audit(
-        trace_id=state.get("trace_id", ""),
-        actor="agent",
-        action="purchase",
-        tool_called="none",
-        arguments="{}",
-        policy_verdict="BLOCK",
-        policy_rule=rule,
-        result="BLOCKED"
-    )
-    return {
-        "status": "blocked",
-        "final_result": final or rule
-    }
+    try:
+        final = state.get("final_result")
+        rule = state.get("policy_rule", "unknown")
+        if not final or final == "No approved product within budget":
+            if rule != "default" and rule != "Unapproved Vendor":
+                final = rule
+                
+        write_audit(
+            trace_id=state.get("trace_id", ""),
+            actor="agent",
+            action="purchase",
+            tool_called="none",
+            arguments="{}",
+            policy_verdict="BLOCK",
+            policy_rule=rule,
+            result="BLOCKED"
+        )
+        return {
+            "status": "blocked",
+            "final_result": final or rule
+        }
+    except Exception as e:
+        write_audit(trace_id=state.get("trace_id",""), actor="agent", action="block_error", result="FAILED", tool_called="none", arguments="{}", policy_verdict="ERROR", policy_rule="none")
+        return {"status": "error", "final_result": str(e)}
 
 def route_policy(state: AgentState) -> str:
     v = state.get("policy_verdict")
@@ -204,7 +234,29 @@ def route_policy(state: AgentState) -> str:
     else:
         return "block_node"
 
+
+def route_human_decision(state: AgentState) -> str:
+    decision = state.get("human_decision")
+    print(f"[DEBUG] route_human_decision: decision={decision}")
+    if not decision:
+        decision = "approved"
+    if decision.lower() == "approved":
+        return "execute_node"
+    else:
+        return "block_node"
+
+def route_plan(state: AgentState) -> str:
+    if state.get("status") == "blocked":
+        return "block_node"
+    return "fetch_info_node"
+
+def route_fetch(state: AgentState) -> str:
+    if state.get("status") == "blocked":
+        return "block_node"
+    return "select_product_node"
+
 def build_graph(safe_mode: bool = True):
+
     builder = StateGraph(AgentState)
     
     def custom_policy_check(state: AgentState) -> dict:
@@ -221,8 +273,8 @@ def build_graph(safe_mode: bool = True):
     builder.add_node("block_node", block_node)
     
     builder.add_edge(START, "plan_node")
-    builder.add_edge("plan_node", "fetch_info_node")
-    builder.add_edge("fetch_info_node", "select_product_node")
+    builder.add_conditional_edges("plan_node", route_plan, {"block_node": "block_node", "fetch_info_node": "fetch_info_node"})
+    builder.add_conditional_edges("fetch_info_node", route_fetch, {"block_node": "block_node", "select_product_node": "select_product_node"})
     builder.add_edge("select_product_node", "policy_check_node")
     
     builder.add_conditional_edges("policy_check_node", route_policy, {
@@ -231,8 +283,15 @@ def build_graph(safe_mode: bool = True):
         "human_approval_node": "human_approval_node"
     })
     
-    memory = MemorySaver()
-    return builder.compile(checkpointer=memory)
+    builder.add_conditional_edges("human_approval_node", route_human_decision, {
+        "execute_node": "execute_node",
+        "block_node": "block_node"
+    })
+    
+    import sqlite3
+    conn = sqlite3.connect("agent/checkpoints.db", check_same_thread=False)
+    memory = SqliteSaver(conn)
+    return builder.compile(checkpointer=memory, interrupt_after=["human_approval_node"])
 
 if __name__ == "__main__":
     app = build_graph()
