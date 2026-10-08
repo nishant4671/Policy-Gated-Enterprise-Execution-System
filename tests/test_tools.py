@@ -20,6 +20,12 @@ def test_get_employee():
     assert res["name"] == "John Doe"
 
 def test_check_budget():
+    import sqlite3
+    conn = sqlite3.connect('mock_systems/enterprise.db')
+    conn.execute("UPDATE budgets SET spent = 12000.0 WHERE department = 'Engineering'")
+    conn.commit()
+    conn.close()
+    
     res = check_budget("Engineering")
     assert "error" not in res
     assert res["remaining"] == 38000.0

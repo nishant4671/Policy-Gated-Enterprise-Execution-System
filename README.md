@@ -9,6 +9,13 @@
 
 ---
 
+## Features
+
+- Demo login system with role-based access (employee / intern / manager)
+- Interactive terminal UI (ui/cli.py) using 
+ich and questionary
+- HITL resume: manager approval resumes the paused LangGraph workflow
+
 ## Overview
 
 Enterprise AI is shifting from answering questions to executing multi-step workflows across email, documents, CRM, HR, and finance systems. However, companies cannot safely deploy unrestricted autonomous agents because LLMs hallucinate, cannot be trusted as the final authority on permissions, and leave no reproducible audit trail.
@@ -96,6 +103,15 @@ Default when no rule matches: ALLOW. On evaluation error: BLOCK (fail-closed).
 
 ## Getting Started
 
+### Demo Accounts
+
+| Employee ID | Password | Role     |
+|-------------|----------|----------|
+| 101         | john123  | Employee |
+| 102         | jane123  | Employee |
+| 103         | bob123   | Intern   |
+| 201         | sarah123 | Manager  |
+
 ### Prerequisites
 
 - Python 3.11+
@@ -148,7 +164,7 @@ python mock_systems/api.py
 **Terminal 2 — Dashboard:**
 
 `ash
-streamlit run ui/app.py
+python ui/cli.py
 `
 
 Opens at http://localhost:8501.
@@ -189,9 +205,10 @@ policy-gated-execution/
 │   ├── main.py
 │   ├── state.py
 │   └── tools.py
-├── ui/                    # Layer 4 — Streamlit
-│   ├── app.py
-│   └── components.py
+├── ui/                    # Layer 4 — Terminal/Streamlit
+│   ├── cli.py             # Interactive terminal UI
+│   ├── app.py             # (legacy Streamlit UI)
+│   └── components.py      # (legacy Streamlit UI)
 ├── tests/                 # Benchmarks + eval
 │   ├── test_cases.json
 │   ├── run_eval.py
@@ -210,7 +227,7 @@ policy-gated-execution/
 ## Testing
 
 `ash
-pytest tests/ -v
+pytest tests/ policy_engine/ -v --tb=short
 `
 
 **Coverage:**

@@ -6,6 +6,11 @@
 **Roll Number:** 4671  
 **Date:** 2026-10-04
 
+### 4.5 Interactive Terminal UI (CLI)
+
+To improve accessibility and demonstrate role-based access control, a new interactive Command Line Interface (CLI) was implemented using 
+ich and questionary. The CLI features a session-aware login system, role-based menus (Employee, Manager, Intern), and seamless workflow submissions with Human-in-the-Loop (HITL) pause-and-resume capabilities.
+
 ---
 
 ## Abstract
@@ -154,6 +159,12 @@ Total Python files: 21
 Total lines of code: 1463  
 Unit tests: 16 passing  
 
+### 4.5 Interactive Terminal UI (CLI)
+
+To improve accessibility and demonstrate role-based access control, a new interactive Command Line Interface (CLI) was implemented using 
+ich and questionary. The CLI features a session-aware login system, role-based menus (Employee, Manager, Intern), and seamless workflow submissions with Human-in-the-Loop (HITL) pause-and-resume capabilities.
+
+
 ---
 
 ## 5. Evaluation
@@ -271,7 +282,7 @@ Key packages: FastAPI, LangGraph, Streamlit, Groq
     python mock_systems/api.py
 
     # Terminal 2 — Streamlit UI
-    streamlit run ui/app.py
+    python ui/cli.py
 
     # Run tests
     pytest tests/ -v
