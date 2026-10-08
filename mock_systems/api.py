@@ -14,6 +14,35 @@ def get_employee(employee_id: int):
         raise HTTPException(status_code=404, detail="Employee not found")
     return dict(row)
 
+from pydantic import BaseModel
+
+class LoginRequest(BaseModel):
+    employee_id: int
+    password: str
+
+@app.post("/login")
+def login(req: LoginRequest):
+    conn = get_connection()
+    user_row = conn.execute("SELECT * FROM users WHERE employee_id = ? AND password = ?", (req.employee_id, req.password)).fetchone()
+    if not user_row:
+        conn.close()
+        raise HTTPException(status_code=401, detail={"status": "error", "message": "Invalid credentials"})
+        
+    emp_row = conn.execute("SELECT * FROM employees WHERE id = ?", (req.employee_id,)).fetchone()
+    conn.close()
+    
+    if not emp_row:
+        raise HTTPException(status_code=401, detail={"status": "error", "message": "Invalid credentials"})
+        
+    return {
+        "status": "ok",
+        "employee_id": req.employee_id,
+        "name": emp_row["name"],
+        "role": user_row["role"],
+        "department": emp_row["department"],
+        "manager_id": emp_row["manager_id"]
+    }
+
 @app.get("/budget/{department}")
 def get_budget(department: str):
     conn = get_connection()

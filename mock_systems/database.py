@@ -70,12 +70,22 @@ def init_db() -> None:
     )
     ''')
 
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        employee_id INTEGER PRIMARY KEY,
+        password TEXT NOT NULL, -- Demo limitation: passwords stored in plain text
+        role TEXT NOT NULL,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )
+    ''')
+
     # Idempotent cleanup
     cursor.execute('DELETE FROM employees')
     cursor.execute('DELETE FROM budgets')
     cursor.execute('DELETE FROM vendors')
     cursor.execute('DELETE FROM products')
     cursor.execute('DELETE FROM audit_log')
+    cursor.execute('DELETE FROM users')
 
     # Seed data
     employees_data = [
@@ -85,6 +95,14 @@ def init_db() -> None:
         (201, "Sarah Chen", "Engineering Manager", "Engineering", None)
     ]
     cursor.executemany('INSERT INTO employees (id, name, role, department, manager_id) VALUES (?, ?, ?, ?, ?)', employees_data)
+    
+    users_data = [
+        (101, "john123", "employee"),
+        (102, "jane123", "employee"),
+        (103, "bob123", "intern"),
+        (201, "sarah123", "manager")
+    ]
+    cursor.executemany('INSERT INTO users (employee_id, password, role) VALUES (?, ?, ?)', users_data)
 
     budgets_data = [
         ("Engineering", 50000.0, 12000.0),
