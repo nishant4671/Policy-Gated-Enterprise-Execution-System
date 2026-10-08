@@ -3,6 +3,7 @@ import os
 import time
 import requests
 import json
+import yaml
 import questionary
 from rich.console import Console
 from rich.panel import Panel
@@ -72,6 +73,7 @@ def prompt_action(options: dict) -> str:
             "approve": "a", "reject": "r", "skip": "s",
             "refresh": "r", "filter": "f", "trace": "t",
             "yes": "y", "no": "n",
+            "search": "s",
         }
         mapped = word_map.get(raw)
         if mapped and mapped in options:
@@ -249,6 +251,106 @@ def audit_log_flow():
         elif action == 'x':
             if questionary.confirm("Exit? (y/n)").ask(): sys.exit(0)
 
+def search_trace_flow():
+    while True:
+        console.print()
+        console.print("────────────────────────────────────────────────")
+        console.print("  🔍  SEARCH BY TRACE ID")
+        console.print("────────────────────────────────────────────────")
+        console.print()
+        
+        trace_input = console.input("Enter trace ID to search: ").strip()
+        if not trace_input:
+            action = prompt_action({"b": "Back", "x": "Exit"})
+            if action == 'b': return
+            elif action == 'x':
+                if questionary.confirm("Exit? (y/n)").ask(): sys.exit(0)
+            continue
+            
+        try:
+            r = requests.get(f"{API_URL}/audit_log", timeout=2)
+            logs = r.json() if r.status_code == 200 else []
+        except:
+            logs = []
+            
+        matching_logs = [log for log in logs if str(log.get("trace_id", "")).startswith(trace_input)]
+        
+        if not matching_logs:
+            console.print(f"No rows found for trace '{trace_input}'.")
+        else:
+            console.print(f"Found {len(matching_logs)} matching actions:")
+            table = Table(box=box.SIMPLE, show_header=True)
+            table.add_column("ID", style="dim")
+            table.add_column("Action")
+            table.add_column("Tool")
+            table.add_column("Verdict")
+            table.add_column("Result")
+            
+            for log in matching_logs:
+                v = log.get("policy_verdict", "")
+                if v == "ALLOW": v = f"[green]{v}[/green]"
+                elif v == "BLOCK": v = f"[red]{v}[/red]"
+                elif v == "REQUIRE_HUMAN_APPROVAL": v = f"[yellow]HUMAN_APPROVAL[/yellow]"
+                
+                table.add_row(
+                    str(log.get("id")),
+                    str(log.get("action")),
+                    str(log.get("tool_called", "")),
+                    v,
+                    str(log.get("result", ""))[:40]
+                )
+            console.print(table)
+            console.print()
+            console.print("Workflow Chain:")
+            for i, log in enumerate(matching_logs):
+                console.print(f"  {i+1}. {log.get('action')} -> {log.get('tool_called')} [{log.get('policy_verdict')}]")
+                
+        action = prompt_action({"s": "Search again", "b": "Back", "x": "Exit"})
+        if action == 'b': return
+        elif action == 's': continue
+        elif action == 'x':
+            if questionary.confirm("Exit? (y/n)").ask(): sys.exit(0)
+
+def view_policy_rules_flow():
+    while True:
+        console.print()
+        console.print("────────────────────────────────────────────────")
+        console.print("  📋  POLICY RULES")
+        console.print("────────────────────────────────────────────────")
+        console.print()
+        
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "..", "policy_engine", "policy.yaml"), "r") as f:
+                policy = yaml.safe_load(f)
+            rules = policy.get("rules", [])
+            
+            table = Table(box=box.SIMPLE, show_header=True)
+            table.add_column("Rule Name")
+            table.add_column("Condition")
+            table.add_column("Verdict")
+            
+            for rule in rules:
+                v = rule.get("verdict", "")
+                if v == "ALLOW": v = f"[green]{v}[/green]"
+                elif v == "BLOCK": v = f"[red]{v}[/red]"
+                elif v == "REQUIRE_HUMAN_APPROVAL": v = f"[yellow]HUMAN_APPROVAL[/yellow]"
+                
+                table.add_row(rule.get("name", ""), rule.get("condition", ""), v)
+                
+            console.print(table)
+            console.print()
+            console.print(f"Total: {len(rules)} rules")
+            console.print("Default verdict when no rule matches: ALLOW")
+            console.print("On evaluation error: BLOCK (fail-closed)")
+            
+        except Exception as e:
+            console.print(f"[red]Error reading policy rules: {e}[/red]")
+            
+        action = prompt_action({"b": "Back", "x": "Exit"})
+        if action == 'b': return
+        elif action == 'x':
+            if questionary.confirm("Exit? (y/n)").ask(): sys.exit(0)
+
 def about_help_flow():
     while True:
         console.print()
@@ -297,20 +399,6 @@ def about_help_flow():
         elif action == 'x':
             if questionary.confirm("Exit? (y/n)").ask(): sys.exit(0)
 
-def placeholder_flow(title):
-    while True:
-        console.print()
-        console.print("────────────────────────────────────────────────")
-        console.print(f"  {title.upper()}")
-        console.print("────────────────────────────────────────────────")
-        console.print()
-        console.print("Feature coming soon.")
-        
-        action = prompt_action({"b": "Back", "x": "Exit"})
-        if action == 'b': return
-        elif action == 'x':
-            if questionary.confirm("Exit? (y/n)").ask(): sys.exit(0)
-
 def main():
     os.system('cls' if os.name == 'nt' else 'clear')
     print_banner()
@@ -326,9 +414,9 @@ def main():
         elif choice == '3':
             audit_log_flow()
         elif choice == '4':
-            placeholder_flow("🔍 Search by trace ID")
+            search_trace_flow()
         elif choice == '5':
-            placeholder_flow("📋 View policy rules")
+            view_policy_rules_flow()
         elif choice == '6':
             about_help_flow()
         elif choice == '7':

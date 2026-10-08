@@ -120,7 +120,7 @@ def select_product_node(state: AgentState) -> dict:
             "status": "blocked",
             "final_result": f"No products available in category {cat}",
             "cost": 0.0,
-            "vendor_approved": False
+            "policy_rule": "No Products Available"
         }
         
     import re
